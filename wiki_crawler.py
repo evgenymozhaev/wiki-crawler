@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 
 
 async def get_pages(current_page, current_depth, http_session, db_session):
+    print(current_depth)
     if current_depth == 6:
         return
     try:
@@ -31,7 +32,8 @@ async def get_pages(current_page, current_depth, http_session, db_session):
                                                            http_session,
                                                            db_session))
                     tasks.append(task)
-        await asyncio.gather(*tasks)  # Так уменьшается количество одновременно открытых http соединений
+        if tasks:
+            await asyncio.gather(*tasks)  # Так уменьшается количество одновременно открытых http соединений
     except (ClientConnectorError, asyncio.TimeoutError):
         return
 
