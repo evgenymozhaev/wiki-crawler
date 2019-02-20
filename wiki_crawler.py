@@ -1,7 +1,7 @@
 import asyncio
 import re
 
-from aiohttp import ClientSession
+from aiohttp import ClientSession, ClientConnectorError
 from sqlalchemy import Column, Integer, String, create_engine, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -10,28 +10,30 @@ from sqlalchemy.orm import sessionmaker
 async def get_pages(current_page, current_depth, http_session, db_session):
     if current_depth == 6:
         return
+    try:
+        tasks = []
+        async with http_session.get(URL_BASE + current_page.url) as response:
+            if response.status == 200:
+                response = await response.text()
+                urls = re.findall('<a href="/wiki/([^"#]+)"', response, flags=re.U | re.DOTALL)
+                urls = set(urls)
+                for url in urls:
+                    page = Page(url=url, request_depth=current_depth + 1)
+                    db_session.add(page)
+                    db_session.commit()
 
-    async with http_session.get(URL_BASE + current_page.url) as response:
-        if response.status == 200:
-            response = await response.text()
-            urls = re.findall('<a href="/wiki/([^"#]+)"', response, flags=re.U | re.DOTALL)
-            urls = set(urls)
-            tasks = []
-            for url in urls:
-                page = Page(url=url, request_depth=current_depth + 1)
-                db_session.add(page)
-                db_session.commit()
+                    relation = Relation(from_page_id=current_page.id, link_id=page.id)
+                    db_session.add(relation)
+                    db_session.commit()
 
-                relation = Relation(from_page_id=current_page.id, link_id=page.id)
-                db_session.add(relation)
-                db_session.commit()
-
-                task = asyncio.ensure_future(get_pages(page,
-                                                       current_depth+1,
-                                                       http_session,
-                                                       db_session))
-                tasks.append(task)
-            await asyncio.gather(*tasks)
+                    task = asyncio.ensure_future(get_pages(page,
+                                                           current_depth+1,
+                                                           http_session,
+                                                           db_session))
+                    tasks.append(task)
+        await asyncio.gather(*tasks)
+    except (ClientConnectorError, asyncio.TimeoutError):
+        return
 
 
 async def main():
